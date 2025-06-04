@@ -33,21 +33,22 @@ except ImportError:
 
 # Resolve SDK paths
 resolve_paths = [
-    (
-        r"C:\Program Files\Blackmagic Design\DaVinci Resolve"
-        r"\Support\Developer\Scripting\Modules"
-    ),
-    (
-        r"C:\ProgramData\Blackmagic Design\DaVinci Resolve"
-        r"\Support\Developer\Scripting\Modules"
-    ),
+    r"C:\\Program Files\\Blackmagic Design\\DaVinci Resolve\\Support\\Developer\\Scripting\\Modules",
+    r"C:\\ProgramData\\Blackmagic Design\\DaVinci Resolve\\Support\\Developer\\Scripting\\Modules",
+    r"C:\\Program Files\\Blackmagic Design\\DaVinci Resolve 2020\\Support\\Developer\\Scripting\\Modules",
+    r"C:\\Program Files\\Blackmagic Design\\DaVinci Resolve Studio\\Support\\Developer\\Scripting\\Modules",
 ]
+if "RESOLVE_SCRIPT_PATH" in os.environ:
+    resolve_paths.insert(0, os.environ["RESOLVE_SCRIPT_PATH"])
 for p in resolve_paths:
     if os.path.isdir(p) and p not in sys.path:
         sys.path.insert(0, p)
 
 # Constants
-RESOLVE_EXE        = r"C:\Program Files\Blackmagic Design\DaVinci Resolve\Resolve.exe"
+RESOLVE_EXE        = os.environ.get(
+    "RESOLVE_EXE",
+    r"C:\Program Files\Blackmagic Design\DaVinci Resolve\Resolve.exe",
+)
 SAVED_DIR          = r"C:\Users\agoll\Desktop\VPSRTfr\Saved"
 INPUT_VIDEO        = os.path.join(SAVED_DIR, "test_vide.mp4")
 PROJECT_PATH       = r"C:\Users\agoll\Desktop\TOOLS\EnhanceTemplate\EnhanceTemplate.drp"
@@ -106,8 +107,13 @@ def trim_to_duration(path, duration):
 def launch_resolve():
     """Start DaVinci Resolve to reduce attach latency."""
     if os.path.isfile(RESOLVE_EXE):
-        subprocess.Popen([RESOLVE_EXE], stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL)
+        subprocess.Popen(
+            [RESOLVE_EXE], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        # give Resolve a moment to initialize so attachment works reliably
+        time.sleep(5)
+    else:
+        print(f"[Resolve] Missing executable at {RESOLVE_EXE}", file=sys.stderr)
 
 def fullscreen_resolve_window():
     try:
@@ -239,13 +245,27 @@ class VideoConverterApp:
         self.recipient_sms_numbers = []
         self.converted    = None
 
-        # Fonts
-        self.font      = font.Font(size=20)
+        # Fonts scaled to screen size
+        screen_w = root.winfo_screenwidth()
+        screen_h = root.winfo_screenheight()
+        scale = min(screen_w / 1920, screen_h / 1080)
+        base = max(12, int(20 * scale))
+        star = max(24, int(48 * scale))
+        self.font = font.Font(size=base)
         try:
-            root.tk.call("font","create","Ethno","-family","Ethnocentric RG","-size","20")
+            root.tk.call(
+                "font",
+                "create",
+                "Ethno",
+                "-family",
+                "Ethnocentric RG",
+                "-size",
+                str(base),
+            )
             self.font = tk.font.nametofont("Ethno")
-        except: pass
-        self.star_font = font.Font(size=48)
+        except Exception:
+            pass
+        self.star_font = font.Font(size=star)
 
         # Video info
         self.input_duration = get_video_duration(INPUT_VIDEO)
@@ -270,7 +290,7 @@ class VideoConverterApp:
         self.canvas = tk.Canvas(
             self.frame,
             bg="#000",
-            height=int(screen_h * 0.6)
+            height=int(screen_h * 0.55),
         )
         self.canvas.pack(fill="x")
         self.play(INPUT_VIDEO)
@@ -288,7 +308,8 @@ class VideoConverterApp:
     # — EMAIL STEP with touch keyboard —
     def show_email_ui(self):
         self.clear_ui(); self.phase="email"
-        ef = tk.Frame(self.frame, bg="#2c2c2c"); ef.pack(pady=10)
+        ef = tk.Frame(self.frame, bg="#2c2c2c")
+        ef.pack(pady=10, padx=10, fill="x")
         tk.Label(ef, text="Please enter your email:", bg="#2c2c2c", fg="#b58900", font=self.font).pack(pady=(0,5))
         e = tk.Entry(
             ef,
@@ -305,16 +326,25 @@ class VideoConverterApp:
         e.pack(pady=(0,10), ipady=8); e.focus()
 
         keys = [
-            list("qwertyuiop"), list("asdfghjkl"),
-            list("zxcvbnm@."), list("1234567890"),
-            ["gmail","yahoo","outlook"], ["Backspace"]
+            list("qwertyuiop"),
+            list("asdfghjkl"),
+            list("zxcvbnm@."),
+            list("1234567890"),
+            ["gmail", "yahoo", "outlook"],
+            ["Backspace"],
         ]
         for row in keys:
-            rf = tk.Frame(ef, bg="#2c2c2c"); rf.pack(pady=1)
-            for k in row:
-                w = 4 if k not in ["gmail","yahoo","outlook","Backspace"] else (10 if k!="Backspace" else 12)
-                DarkButton(rf, text=k, width=int(w*0.97), height=2,
-                           font=self.font, command=lambda kk=k: self.on_email_key(kk)).pack(side="left", padx=1)
+            rf = tk.Frame(ef, bg="#2c2c2c")
+            rf.pack(pady=1, padx=10, fill="x")
+            for idx, k in enumerate(row):
+                b = DarkButton(
+                    rf,
+                    text=k,
+                    font=self.font,
+                    command=lambda kk=k: self.on_email_key(kk),
+                )
+                b.grid(row=0, column=idx, sticky="nsew", padx=1)
+                rf.grid_columnconfigure(idx, weight=1)
 
         DarkButton(ef, text="Next", font=self.font, command=self.on_email_next).pack(pady=10)
 
@@ -336,7 +366,8 @@ class VideoConverterApp:
     # — PHONE STEP (no carrier select) —
     def show_phone_ui(self):
         self.clear_ui(); self.phase="phone"
-        pf = tk.Frame(self.frame, bg="#2c2c2c"); pf.pack(pady=10)
+        pf = tk.Frame(self.frame, bg="#2c2c2c")
+        pf.pack(pady=10, padx=10, fill="x")
         tk.Label(pf, text="Enter your phone (10 digits):", bg="#2c2c2c", fg="#b58900", font=self.font).pack(pady=(0,5))
         pe = tk.Entry(
             pf,
@@ -352,12 +383,19 @@ class VideoConverterApp:
         )
         pe.pack(pady=(0,10), ipady=8); pe.focus()
 
-        nums = [["1","2","3"],["4","5","6"],["7","8","9"],["Back","0","Del"]]
+        nums = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["Back", "0", "Del"]]
         for row in nums:
-            rf = tk.Frame(pf, bg="#2c2c2c"); rf.pack(pady=2)
-            for k in row:
-                DarkButton(rf, text=k, width=6, height=2, font=self.font,
-                           command=lambda kk=k: self.on_phone_key(kk)).pack(side="left", padx=2)
+            rf = tk.Frame(pf, bg="#2c2c2c")
+            rf.pack(pady=2, padx=10, fill="x")
+            for idx, k in enumerate(row):
+                b = DarkButton(
+                    rf,
+                    text=k,
+                    font=self.font,
+                    command=lambda kk=k: self.on_phone_key(kk),
+                )
+                b.grid(row=0, column=idx, sticky="nsew", padx=2)
+                rf.grid_columnconfigure(idx, weight=1)
 
         DarkButton(pf, text="Next", font=self.font, command=self.on_phone_next).pack(pady=10)
 
@@ -381,7 +419,8 @@ class VideoConverterApp:
     def show_rating_ui(self):
         self.clear_ui(); self.phase="rating"
         tk.Label(self.frame, text="Please rate your experience:", bg="#2c2c2c", fg="#b58900", font=self.font).pack(pady=10)
-        rf = tk.Frame(self.frame, bg="#2c2c2c"); rf.pack(pady=5)
+        rf = tk.Frame(self.frame, bg="#2c2c2c")
+        rf.pack(pady=5, padx=10, fill="x")
         self.stars = []
         for i in range(5):
             b = DarkButton(rf, text="☆", font=self.star_font,
@@ -442,7 +481,7 @@ class VideoConverterApp:
         if not resolve:
             print("[Resolve] Launching Resolve...")
             launch_resolve()
-        while not resolve and attempts < 10:
+        while not resolve and attempts < 20:
             attempts += 1
             print(f"[Resolve] Attempt {attempts} to attach...")
             time.sleep(2)
