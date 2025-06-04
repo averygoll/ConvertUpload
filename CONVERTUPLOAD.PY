@@ -8,6 +8,7 @@ import base64
 import re
 import time
 import types
+from shutil import which
 
 import tkinter as tk
 from tkinter import font, StringVar
@@ -23,13 +24,23 @@ try:
     from screeninfo import get_monitors
 except ImportError:
     def get_monitors():
-        class M: x=0; y=0; width=800; height=600
+        class M:
+            x = 0
+            y = 0
+            width = 800
+            height = 600
         return [M()]
 
 # Resolve SDK paths
 resolve_paths = [
-    r"C:\Program Files\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\Modules",
-    r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\Modules"
+    (
+        r"C:\Program Files\Blackmagic Design\DaVinci Resolve"
+        r"\Support\Developer\Scripting\Modules"
+    ),
+    (
+        r"C:\ProgramData\Blackmagic Design\DaVinci Resolve"
+        r"\Support\Developer\Scripting\Modules"
+    ),
 ]
 for p in resolve_paths:
     if os.path.isdir(p) and p not in sys.path:
@@ -55,6 +66,46 @@ CARRIER_GATEWAYS = {
     "TMobile": "@tmomail.net",
     "Sprint": "@messaging.sprint.com"
 }
+
+# --- Utility helpers ---
+def get_video_duration(path):
+    """Return video duration in seconds using ffprobe."""
+    if not which("ffprobe"):
+        return 60.0
+    try:
+        out = subprocess.check_output([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", path
+        ], text=True)
+        return float(out.strip())
+    except Exception:
+        return 60.0
+
+def trim_to_duration(path, duration):
+    """Ensure the exported video matches the desired duration."""
+    if not which("ffprobe") or not which("ffmpeg"):
+        return
+    try:
+        out = subprocess.check_output([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", path
+        ], text=True)
+        cur = float(out.strip())
+        if abs(cur - duration) > 0.1:
+            tmp = path + ".trim.mp4"
+            subprocess.run([
+                "ffmpeg", "-y", "-i", path, "-t", str(duration),
+                "-c", "copy", tmp
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            os.replace(tmp, path)
+    except Exception:
+        pass
+
+def launch_resolve():
+    """Start DaVinci Resolve to reduce attach latency."""
+    if os.path.isfile(RESOLVE_EXE):
+        subprocess.Popen([RESOLVE_EXE], stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL)
 
 def fullscreen_resolve_window():
     try:
@@ -175,6 +226,13 @@ class VideoConverterApp:
             self.font = tk.font.nametofont("Ethno")
         except: pass
         self.star_font = font.Font(size=48)
+
+        # Video info
+        self.input_duration = get_video_duration(INPUT_VIDEO)
+        self.progress_interval = max(1, self.input_duration / 10)
+
+        # Launch Resolve early for faster attachment
+        threading.Thread(target=launch_resolve, daemon=True).start()
 
         # VLC
         self.vlc_mod      = vlc
@@ -311,8 +369,9 @@ class VideoConverterApp:
         self.root.after(1000, self.keep_alive)
 
     def fake_progress(self):
+        interval = self.progress_interval
         while not self.conversion_done:
-            time.sleep(0.7)
+            time.sleep(interval)
             if self.fake_pct < 99:
                 self.fake_pct += 1
                 p = self.fake_pct
@@ -333,9 +392,10 @@ class VideoConverterApp:
 
         resolve = dvr.scriptapp("Resolve")
         attempts = 0
-        while not resolve and attempts < 5:
-            subprocess.Popen([RESOLVE_EXE])
-            time.sleep(5)
+        if not resolve:
+            launch_resolve()
+        while not resolve and attempts < 10:
+            time.sleep(2)
             resolve = dvr.scriptapp("Resolve")
             attempts += 1
         if not resolve:
@@ -395,6 +455,7 @@ class VideoConverterApp:
             time.sleep(0.5)
 
         out = os.path.join(SAVED_DIR, base + ".mp4")
+        trim_to_duration(out, self.input_duration)
         self.converted = out
         self.conversion_done = True
 
