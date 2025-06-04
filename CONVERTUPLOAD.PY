@@ -86,6 +86,7 @@ def get_video_duration(path):
 def trim_to_duration(path, duration):
     """Ensure the exported video matches the desired duration."""
     if not which("ffprobe") or not which("ffmpeg"):
+        print("[Trim] ffprobe/ffmpeg not available; skipping")
         return
     try:
         out = subprocess.check_output([
@@ -93,15 +94,19 @@ def trim_to_duration(path, duration):
             "-of", "default=noprint_wrappers=1:nokey=1", path
         ], text=True)
         cur = float(out.strip())
+        print(f"[Trim] Current duration {cur:.2f}s, target {duration:.2f}s")
         if abs(cur - duration) > 0.1:
+            print("[Trim] Trimming output to match input duration")
             tmp = path + ".trim.mp4"
             subprocess.run([
                 "ffmpeg", "-y", "-i", path, "-t", str(duration),
                 "-c", "copy", tmp
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             os.replace(tmp, path)
-    except Exception:
-        pass
+        else:
+            print("[Trim] No trimming needed")
+    except Exception as e:
+        print(f"[Trim] Error checking duration: {e}")
 
 def launch_resolve():
     """Start DaVinci Resolve to reduce attach latency."""
@@ -205,17 +210,21 @@ class DarkButton(tk.Button):
         )
         self._normal_bg = normal_bg
         self._active_bg = active_bg
+        self._after_id = None
         self.bind("<ButtonPress-1>", self._on_press, add="+")
         self.bind("<ButtonRelease-1>", self._on_release, add="+")
 
     def _on_press(self, event):
+        if self._after_id:
+            self.after_cancel(self._after_id)
+            self._after_id = None
         self.configure(bg=self._active_bg)
 
     def _on_release(self, event):
-        self.configure(bg=self._normal_bg)
         winsound.PlaySound(CLICK_SOUND, winsound.SND_FILENAME | winsound.SND_ASYNC)
         if self._cmd:
             self._cmd()
+        self._after_id = self.after(250, lambda: self.configure(bg=self._normal_bg))
 
 class VideoConverterApp:
     def __init__(self, root):
@@ -270,7 +279,7 @@ class VideoConverterApp:
         self.canvas = tk.Canvas(
             self.frame,
             bg="#000",
-            height=int(screen_h * 0.6)
+            height=int(screen_h * 0.5)
         )
         self.canvas.pack(fill="x")
         self.play(INPUT_VIDEO)
@@ -451,6 +460,8 @@ class VideoConverterApp:
             print(f"[Resolve] Can't attach after {attempts} attempts", file=sys.stderr)
             return
         print("[Resolve] Attached to running instance")
+        print(f"[Resolve] Input video: {INPUT_VIDEO}")
+        print(f"[Resolve] Input duration: {self.input_duration:.2f}s")
 
         pm = resolve.GetProjectManager()
         print(f"[Resolve] Loading project '{PROJECT_NAME}'...")
@@ -516,6 +527,7 @@ class VideoConverterApp:
         out = os.path.join(SAVED_DIR, base + ".mp4")
         print(f"[Resolve] Render finished. Output: {out}")
         trim_to_duration(out, self.input_duration)
+        print(f"[Resolve] Output trimmed to {self.input_duration:.2f}s")
         self.converted = out
         self.conversion_done = True
         print("[Resolve] Conversion complete")
