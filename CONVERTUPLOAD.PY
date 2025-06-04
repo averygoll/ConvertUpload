@@ -267,10 +267,11 @@ class VideoConverterApp:
         self.frame = tk.Frame(self.root, bg="#2c2c2c")
         self.frame.pack(fill="both", expand=True)
         screen_h = self.root.winfo_screenheight()
+        # use half the screen for video so onscreen keyboards fit better
         self.canvas = tk.Canvas(
             self.frame,
             bg="#000",
-            height=int(screen_h * 0.6)
+            height=int(screen_h * 0.5)
         )
         self.canvas.pack(fill="x")
         self.play(INPUT_VIDEO)
@@ -442,7 +443,7 @@ class VideoConverterApp:
         if not resolve:
             print("[Resolve] Launching Resolve...")
             launch_resolve()
-        while not resolve and attempts < 10:
+        while not resolve and attempts < 20:
             attempts += 1
             print(f"[Resolve] Attempt {attempts} to attach...")
             time.sleep(2)
@@ -455,6 +456,11 @@ class VideoConverterApp:
         pm = resolve.GetProjectManager()
         print(f"[Resolve] Loading project '{PROJECT_NAME}'...")
         if not pm.LoadProject(PROJECT_NAME):
+            try:
+                avail = pm.GetProjectsInCurrentFolder()
+                print(f"[Resolve] Available projects: {list(avail.values())}")
+            except Exception as e:
+                print(f"[Resolve] Unable to list projects: {e}")
             if os.path.exists(PROJECT_PATH):
                 print(f"[Resolve] Importing template from {PROJECT_PATH}...")
                 pm.ImportProject(PROJECT_PATH)
@@ -462,8 +468,10 @@ class VideoConverterApp:
                     print("[Resolve] Failed to load template", file=sys.stderr)
                     return
             else:
-                print("[Resolve] Project file missing", file=sys.stderr)
-                return
+                print("[Resolve] Project file missing; creating new project...")
+                if not pm.CreateProject(PROJECT_NAME):
+                    print("[Resolve] Failed to create project", file=sys.stderr)
+                    return
         print("[Resolve] Project loaded")
         proj = pm.GetCurrentProject()
         tl   = proj.GetCurrentTimeline() or proj.GetTimelineByIndex(1)
