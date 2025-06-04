@@ -50,6 +50,8 @@ for p in resolve_paths:
 RESOLVE_EXE        = r"C:\Program Files\Blackmagic Design\DaVinci Resolve\Resolve.exe"
 SAVED_DIR          = r"C:\Users\agoll\Desktop\VPSRTfr\Saved"
 INPUT_VIDEO        = os.path.join(SAVED_DIR, "test_vide.mp4")
+PROJECT_PATH       = r"C:\Users\agoll\Desktop\TOOLS\EnhanceTemplate\EnhanceTemplate.drp"
+PROJECT_NAME       = "EnhanceTemplate"
 TOKEN_PATH         = os.path.join(os.getcwd(), "token.json")
 CLIENT_SECRET_PATH = os.path.join(os.getcwd(), "credentials.json")
 SCOPES             = [
@@ -184,18 +186,36 @@ def is_valid_email(e): return re.match(r"[^@]+@[^@]+\.[^@]+", e)
 def is_valid_phone(p): return re.match(r"^\d{10}$", p)
 
 class DarkButton(tk.Button):
+    """Custom button with better touch feedback."""
+
     def __init__(self, master=None, **kw):
-        cmd = kw.pop("command", None)
-        super().__init__(master,
+        self._cmd = kw.pop("command", None)
+        normal_bg = kw.pop("bg", "#222222")
+        active_bg = kw.pop("activebackground", "#444444")
+        super().__init__(
+            master,
             relief="flat",
-            bg="#222222", fg="#b58900",
-            activebackground="#444444", activeforeground="#ffffff",
-            **kw
+            bg=normal_bg,
+            fg="#b58900",
+            activebackground=active_bg,
+            activeforeground="#ffffff",
+            highlightthickness=0,
+            bd=0,
+            **kw,
         )
-        def wrapped():
-            winsound.PlaySound(CLICK_SOUND, winsound.SND_FILENAME|winsound.SND_ASYNC)
-            if cmd: cmd()
-        self.configure(command=wrapped)
+        self._normal_bg = normal_bg
+        self._active_bg = active_bg
+        self.bind("<ButtonPress-1>", self._on_press, add="+")
+        self.bind("<ButtonRelease-1>", self._on_release, add="+")
+
+    def _on_press(self, event):
+        self.configure(bg=self._active_bg)
+
+    def _on_release(self, event):
+        self.configure(bg=self._normal_bg)
+        winsound.PlaySound(CLICK_SOUND, winsound.SND_FILENAME | winsound.SND_ASYNC)
+        if self._cmd:
+            self._cmd()
 
 class VideoConverterApp:
     def __init__(self, root):
@@ -229,7 +249,7 @@ class VideoConverterApp:
 
         # Video info
         self.input_duration = get_video_duration(INPUT_VIDEO)
-        self.progress_interval = max(1, self.input_duration / 10)
+        self.start_time = time.time()
 
         # Launch Resolve early for faster attachment
         threading.Thread(target=launch_resolve, daemon=True).start()
@@ -263,8 +283,18 @@ class VideoConverterApp:
         self.clear_ui(); self.phase="email"
         ef = tk.Frame(self.frame, bg="#2c2c2c"); ef.pack(pady=10)
         tk.Label(ef, text="Please enter your email:", bg="#2c2c2c", fg="#b58900", font=self.font).pack(pady=(0,5))
-        e = tk.Entry(ef, textvariable=self.email_var, font=self.font, width=30,
-                     bg="#333333", fg="#b58900", insertbackground="#b58900", relief="flat")
+        e = tk.Entry(
+            ef,
+            textvariable=self.email_var,
+            font=self.font,
+            width=30,
+            bg="#333333",
+            fg="#b58900",
+            insertbackground="#333333",
+            insertwidth=0,
+            relief="flat",
+            highlightthickness=0,
+        )
         e.pack(pady=(0,10), ipady=8); e.focus()
 
         keys = [
@@ -301,8 +331,18 @@ class VideoConverterApp:
         self.clear_ui(); self.phase="phone"
         pf = tk.Frame(self.frame, bg="#2c2c2c"); pf.pack(pady=10)
         tk.Label(pf, text="Enter your phone (10 digits):", bg="#2c2c2c", fg="#b58900", font=self.font).pack(pady=(0,5))
-        pe = tk.Entry(pf, textvariable=self.phone_var, font=self.font, width=15,
-                     bg="#333333", fg="#b58900", insertbackground="#b58900", relief="flat")
+        pe = tk.Entry(
+            pf,
+            textvariable=self.phone_var,
+            font=self.font,
+            width=15,
+            bg="#333333",
+            fg="#b58900",
+            insertbackground="#333333",
+            insertwidth=0,
+            relief="flat",
+            highlightthickness=0,
+        )
         pe.pack(pady=(0,10), ipady=8); pe.focus()
 
         nums = [["1","2","3"],["4","5","6"],["7","8","9"],["Back","0","Del"]]
@@ -369,13 +409,12 @@ class VideoConverterApp:
         self.root.after(1000, self.keep_alive)
 
     def fake_progress(self):
-        interval = self.progress_interval
+        """Update progress based on elapsed time."""
         while not self.conversion_done:
-            time.sleep(interval)
-            if self.fake_pct < 99:
-                self.fake_pct += 1
-                p = self.fake_pct
-                self.root.after(0, lambda pct=p: self.status.config(text=f"Enhancing: {pct}%"))
+            elapsed = time.time() - self.start_time
+            pct = int(min(99, (elapsed / self.input_duration) * 100))
+            self.root.after(0, lambda p=pct: self.status.config(text=f"Enhancing: {p}%"))
+            time.sleep(1)
         self.root.after(0, lambda: self.status.config(text="It's complete"))
 
     # — CONVERSION —
@@ -403,17 +442,17 @@ class VideoConverterApp:
             return
 
         pm = resolve.GetProjectManager()
-        if not pm.LoadProject("EnhanceTemplate"):
-            print("Failed to load template", file=sys.stderr)
-            return
+        if not pm.LoadProject(PROJECT_NAME):
+            if os.path.exists(PROJECT_PATH):
+                pm.ImportProject(PROJECT_PATH)
+                if not pm.LoadProject(PROJECT_NAME):
+                    print("Failed to load template", file=sys.stderr)
+                    return
+            else:
+                print("Project file missing", file=sys.stderr)
+                return
         proj = pm.GetCurrentProject()
-        mp   = proj.GetMediaPool()
         tl   = proj.GetCurrentTimeline() or proj.GetTimelineByIndex(1)
-
-        mp.ImportMedia([INPUT_VIDEO])
-        for clip in tl.GetItemsInTrack("video",1).values():
-            try: clip.AutoColor()
-            except: pass
 
         proj.SetSetting("timelineResolutionWidth","2160")
         proj.SetSetting("timelineResolutionHeight","3840")
@@ -448,6 +487,7 @@ class VideoConverterApp:
         proj.SetRenderSettings(rs)
         proj.DeleteAllRenderJobs()
         job_id = proj.AddRenderJob()
+        self.start_time = time.time()
         proj.StartRendering(job_id)
         threading.Thread(target=fullscreen_resolve_window, daemon=True).start()
 
