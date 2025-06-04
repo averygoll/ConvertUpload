@@ -264,8 +264,15 @@ class VideoConverterApp:
         threading.Thread(target=self.fake_progress, daemon=True).start()
 
     def build_ui(self):
-        self.frame = tk.Frame(self.root, bg="#2c2c2c"); self.frame.pack(fill="both", expand=True)
-        self.canvas = tk.Canvas(self.frame, bg="#000"); self.canvas.pack(fill="both", expand=True)
+        self.frame = tk.Frame(self.root, bg="#2c2c2c")
+        self.frame.pack(fill="both", expand=True)
+        screen_h = self.root.winfo_screenheight()
+        self.canvas = tk.Canvas(
+            self.frame,
+            bg="#000",
+            height=int(screen_h * 0.6)
+        )
+        self.canvas.pack(fill="x")
         self.play(INPUT_VIDEO)
         self.status = tk.Label(self.frame, text="Enhancing: 0%", bg="#2c2c2c", fg="#b58900", font=self.font)
         self.status.pack(pady=10)
@@ -419,38 +426,45 @@ class VideoConverterApp:
 
     # — CONVERSION —
     def run_conversion(self):
+        print("[Resolve] Importing SDK...")
         try:
             import DaVinciResolveScript as dvr
-        except ImportError:
-            print("SDK not found", file=sys.stderr)
+        except ImportError as e:
+            print(f"[Resolve] SDK not found: {e}", file=sys.stderr)
             return
 
         if not os.path.isfile(RESOLVE_EXE):
-            print(f"Resolve.exe missing at {RESOLVE_EXE}", file=sys.stderr)
+            print(f"[Resolve] Resolve.exe missing at {RESOLVE_EXE}", file=sys.stderr)
             return
 
         resolve = dvr.scriptapp("Resolve")
         attempts = 0
         if not resolve:
+            print("[Resolve] Launching Resolve...")
             launch_resolve()
         while not resolve and attempts < 10:
+            attempts += 1
+            print(f"[Resolve] Attempt {attempts} to attach...")
             time.sleep(2)
             resolve = dvr.scriptapp("Resolve")
-            attempts += 1
         if not resolve:
-            print(f"Can't attach after {attempts} attempts", file=sys.stderr)
+            print(f"[Resolve] Can't attach after {attempts} attempts", file=sys.stderr)
             return
+        print("[Resolve] Attached to running instance")
 
         pm = resolve.GetProjectManager()
+        print(f"[Resolve] Loading project '{PROJECT_NAME}'...")
         if not pm.LoadProject(PROJECT_NAME):
             if os.path.exists(PROJECT_PATH):
+                print(f"[Resolve] Importing template from {PROJECT_PATH}...")
                 pm.ImportProject(PROJECT_PATH)
                 if not pm.LoadProject(PROJECT_NAME):
-                    print("Failed to load template", file=sys.stderr)
+                    print("[Resolve] Failed to load template", file=sys.stderr)
                     return
             else:
-                print("Project file missing", file=sys.stderr)
+                print("[Resolve] Project file missing", file=sys.stderr)
                 return
+        print("[Resolve] Project loaded")
         proj = pm.GetCurrentProject()
         tl   = proj.GetCurrentTimeline() or proj.GetTimelineByIndex(1)
 
@@ -488,16 +502,23 @@ class VideoConverterApp:
         proj.DeleteAllRenderJobs()
         job_id = proj.AddRenderJob()
         self.start_time = time.time()
+        print("[Resolve] Starting render job...")
         proj.StartRendering(job_id)
         threading.Thread(target=fullscreen_resolve_window, daemon=True).start()
 
+        last_log = time.time()
         while proj.IsRenderingInProgress():
+            if time.time() - last_log > 5:
+                print("[Resolve] Rendering in progress...")
+                last_log = time.time()
             time.sleep(0.5)
 
         out = os.path.join(SAVED_DIR, base + ".mp4")
+        print(f"[Resolve] Render finished. Output: {out}")
         trim_to_duration(out, self.input_duration)
         self.converted = out
         self.conversion_done = True
+        print("[Resolve] Conversion complete")
 
         for p in secondary_procs:
             p.terminate()
