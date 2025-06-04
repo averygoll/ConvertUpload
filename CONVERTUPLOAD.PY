@@ -103,8 +103,14 @@ def trim_to_duration(path, duration):
     except Exception:
         pass
 
-def launch_resolve():
-    """Start DaVinci Resolve to reduce attach latency."""
+def launch_resolve(project=None):
+    """Start DaVinci Resolve optionally loading a project file."""
+    if project and os.path.isfile(project):
+        try:
+            os.startfile(project)
+            return
+        except Exception:
+            pass
     if os.path.isfile(RESOLVE_EXE):
         subprocess.Popen([RESOLVE_EXE], stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL)
@@ -240,9 +246,9 @@ class VideoConverterApp:
         self.converted    = None
 
         # Fonts
-        self.font      = font.Font(size=20)
+        self.font      = font.Font(size=18)
         try:
-            root.tk.call("font","create","Ethno","-family","Ethnocentric RG","-size","20")
+            root.tk.call("font","create","Ethno","-family","Ethnocentric RG","-size","18")
             self.font = tk.font.nametofont("Ethno")
         except: pass
         self.star_font = font.Font(size=48)
@@ -251,8 +257,8 @@ class VideoConverterApp:
         self.input_duration = get_video_duration(INPUT_VIDEO)
         self.start_time = time.time()
 
-        # Launch Resolve early for faster attachment
-        threading.Thread(target=launch_resolve, daemon=True).start()
+        # Launch Resolve early for faster attachment with the project
+        threading.Thread(target=lambda: launch_resolve(PROJECT_PATH), daemon=True).start()
 
         # VLC
         self.vlc_mod      = vlc
@@ -302,7 +308,7 @@ class VideoConverterApp:
             relief="flat",
             highlightthickness=0,
         )
-        e.pack(pady=(0,10), ipady=8); e.focus()
+        e.pack(pady=(0,10), ipady=6); e.focus()
 
         keys = [
             list("qwertyuiop"), list("asdfghjkl"),
@@ -312,7 +318,7 @@ class VideoConverterApp:
         for row in keys:
             rf = tk.Frame(ef, bg="#2c2c2c"); rf.pack(pady=1)
             for k in row:
-                w = 4 if k not in ["gmail","yahoo","outlook","Backspace"] else (10 if k!="Backspace" else 12)
+                w = 3 if k not in ["gmail","yahoo","outlook","Backspace"] else (8 if k!="Backspace" else 10)
                 DarkButton(rf, text=k, width=int(w*0.97), height=2,
                            font=self.font, command=lambda kk=k: self.on_email_key(kk)).pack(side="left", padx=1)
 
@@ -350,13 +356,13 @@ class VideoConverterApp:
             relief="flat",
             highlightthickness=0,
         )
-        pe.pack(pady=(0,10), ipady=8); pe.focus()
+        pe.pack(pady=(0,10), ipady=6); pe.focus()
 
         nums = [["1","2","3"],["4","5","6"],["7","8","9"],["Back","0","Del"]]
         for row in nums:
             rf = tk.Frame(pf, bg="#2c2c2c"); rf.pack(pady=2)
             for k in row:
-                DarkButton(rf, text=k, width=6, height=2, font=self.font,
+                DarkButton(rf, text=k, width=5, height=2, font=self.font,
                            command=lambda kk=k: self.on_phone_key(kk)).pack(side="left", padx=2)
 
         DarkButton(pf, text="Next", font=self.font, command=self.on_phone_next).pack(pady=10)
@@ -440,8 +446,8 @@ class VideoConverterApp:
         resolve = dvr.scriptapp("Resolve")
         attempts = 0
         if not resolve:
-            print("[Resolve] Launching Resolve...")
-            launch_resolve()
+            print("[Resolve] Launching Resolve with project...")
+            launch_resolve(PROJECT_PATH)
         while not resolve and attempts < 10:
             attempts += 1
             print(f"[Resolve] Attempt {attempts} to attach...")
