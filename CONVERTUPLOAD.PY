@@ -138,13 +138,17 @@ secondary_procs = []
 def start_secondary_loops(path):
     global secondary_procs
     for m in monitors[1:]:
-        p = subprocess.Popen([
-            "ffplay","-noborder","-loop","0",
+        cmd = [
+            "ffplay", "-noborder", "-loop", "0", "-an",
             "-x", str(m.width), "-y", str(m.height),
             "-left", str(m.x), "-top", str(m.y),
-            "-loglevel","quiet","-vf","fps=24",
-            path
-        ])
+            "-loglevel", "quiet",
+            "-hwaccel", "auto",
+            "-fflags", "nobuffer", "-flags", "low_delay",
+            "-framedrop",
+            path,
+        ]
+        p = subprocess.Popen(cmd)
         secondary_procs.append(p)
 start_secondary_loops(INPUT_VIDEO)
 
